@@ -29,13 +29,8 @@ on:
           - android13-5.15
           - android12-5.10
         default: OOS14+15+16
-      ksu_options:
-        description: 'Enter KernelSU build json'
-        required: true
-        type: string
-        default: '[{"type":"ksun","hash":"dev"}]'
       optimize_level:
-        description: "Compiler optimization level"
+        description: 'Compiler optimization level'
         required: true
         type: choice
         options: [O2, O3]
@@ -49,6 +44,47 @@ on:
         required: false
         type: boolean
         default: false
+      zram_compression:
+        description: 'Default ZRAM compression algorithm'
+        required: false
+        type: choice
+        options: [lz4, zstd, lzo, lzo-rle]
+        default: lz4
+      custom_kernel_suffix:
+        description: 'Custom kernel localversion suffix (e.g. -android15-8-g97... ). Leave empty for default.'
+        required: false
+        type: string
+        default: ""
+      use_stock_version:
+        description: 'Auto-extract exact kernel version from stock boot.img (Overrides manual suffix)?'
+        required: false
+        type: boolean
+        default: true
+      enable_optimizations:
+        description: 'Enable general kernel memory/CPU optimizations?'
+        required: false
+        type: boolean
+        default: true
+      enable_bbr:
+        description: 'Enable BBR (TCP Congestion Control)?'
+        required: false
+        type: boolean
+        default: true
+      enable_ds:
+        description: 'Enable Droidspaces (Linux Containers support)?'
+        required: false
+        type: boolean
+        default: true
+      enable_ttl:
+        description: 'Enable TTL target support?'
+        required: false
+        type: boolean
+        default: true
+      create_patched_img:
+        description: 'Create patched boot.img (requires stock boot.img in assets/stock_images/)?'
+        required: false
+        type: boolean
+        default: true
       mirror_toolchains:
         description: 'Do you want to sync toolchains before build? [99% runs not required]'
         required: false
@@ -58,6 +94,16 @@ on:
         description: 'Custom kernel build timestamp for uname -a (e.g. "Tue Feb 10 10:01:02 UTC 2026"). Leave empty for current time.'
         type: string
         default: ''
+      enable_ksu_susfs:
+        description: 'Enable KernelSU(Next) and SuSFS?'
+        required: false
+        type: boolean
+        default: true
+      ksu_options:
+        description: 'Enter KernelSU build json'
+        required: true
+        type: string
+        default: '[{"type":"ksun","hash":"dev"}]'
       android12-5_10_susfs_branch_or_commit:
         description: 'Enter SusFS Branch or commit hash for android12-5.10'
         type: string
@@ -114,9 +160,15 @@ jobs:
           
           input="${{ github.event.inputs.op_model }}"
           ksu_options_raw='${{ github.event.inputs.ksu_options }}'
-          if ! ksu_options_normalized=$(echo "$ksu_options_raw" | jq -c 'map(if .type then .type |= ascii_upcase | if .hash == null then if .type == "KSUN" then .hash = "dev" elif .type == "KSU" then .hash = "main" else .hash end else . end else error("No type found") end)' 2>&1); then
-            echo "::error::ksu_options validation failed: $ksu_options_normalized"
-            exit 1
+          
+          if [ "${{ inputs.enable_ksu_susfs }}" == "false" ]; then
+            echo "ℹ️ KSU and SuSFS explicitly disabled. Forcing Vanilla mode."
+            ksu_options_normalized='[{"type":"NONE","hash":"none"}]'
+          else
+            if ! ksu_options_normalized=$(echo "$ksu_options_raw" | jq -c 'map(if .type then .type |= ascii_upcase | if .hash == null then if .type == "KSUN" then .hash = "dev" elif .type == "KSU" then .hash = "main" else .hash end else . end else error("No type found") end)' 2>&1); then
+              echo "::error::ksu_options validation failed: $ksu_options_normalized"
+              exit 1
+            fi
           fi
           
           echo "ksu_options_normalized=$ksu_options_normalized" >> $GITHUB_OUTPUT
@@ -171,6 +223,19 @@ jobs:
           esac
           
           filtered=$(jq -c "$jq_filter" matrix.json)
+          
+          filtered=$(echo "$filtered" | jq -c \
+            --argjson bbr "${{ inputs.enable_bbr }}" \
+            --argjson ds "${{ inputs.enable_ds }}" \
+            --argjson ttl "${{ inputs.enable_ttl }}" \
+            --argjson susfs "${{ inputs.enable_ksu_susfs }}" \
+            'map(
+              .bbr = (if $bbr then .bbr else false end) |
+              .ds = (if $ds then .ds else false end) |
+              .ttl = (if $ttl then .ttl else false end) |
+              .susfs = (if $susfs then .susfs else false end)
+            )')
+          
           count=$(jq 'length' <<<"$filtered")
           
           filtered=$(echo "$filtered" | jq '
@@ -230,33 +295,38 @@ jobs:
           
           echo "Resolving $ksu_type hash ($ksu_ref)..."
           
-          until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
-            RESULT=$(gh api graphql -f query="$QUERY" -f owner="$KSU_REPO_OWNER" -f name="$KSU_REPO_NAME" -f headRef="$HEAD_REF" -f tagRef="$TAG_REF" -f objRef="$ksu_ref" 2>/dev/null)
-            EXIT_CODE=$?
+          if [ "$ksu_type" == "NONE" ]; then
+            resolved_sha="none"
+            echo "  ✅ KSU skipped (Vanilla Kernel Mode)"
+          else
+            until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+              RESULT=$(gh api graphql -f query="$QUERY" -f owner="$KSU_REPO_OWNER" -f name="$KSU_REPO_NAME" -f headRef="$HEAD_REF" -f tagRef="$TAG_REF" -f objRef="$ksu_ref" 2>/dev/null)
+              EXIT_CODE=$?
+              
+              if [ $EXIT_CODE -eq 0 ] && [ ! -z "$RESULT" ]; then
+                echo "  ✅ API Success"
+                break
+              fi
+              
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "::warning::API failed (Attempt $RETRY_COUNT/$MAX_RETRIES). Retrying in ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            done
             
-            if [ $EXIT_CODE -eq 0 ] && [ ! -z "$RESULT" ]; then
-              echo "  ✅ API Success"
-              break
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "::error::GitHub API unreachable. Cannot validate $ksu_ref"
+              exit 1
             fi
             
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "::warning::API failed (Attempt $RETRY_COUNT/$MAX_RETRIES). Retrying in ${RETRY_DELAY}s..."
-            sleep $RETRY_DELAY
-          done
-          
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "::error::GitHub API unreachable. Cannot validate $ksu_ref"
-            exit 1
+            resolved_sha=$(echo "$RESULT" | jq -r '.data.repository | (.hb.t.o // .ht.t.o // .ho.o // "unknown")')
+            
+            if [ "$resolved_sha" == "unknown" ]; then
+              echo "::error::Ref/Hash '$ksu_ref' does not exist in $KSU_REPO_OWNER/$KSU_REPO_NAME"
+              exit 1
+            fi
+            
+            echo "  ✅ Resolved: $ksu_type/$ksu_ref → $resolved_sha"
           fi
-          
-          resolved_sha=$(echo "$RESULT" | jq -r '.data.repository | (.hb.t.o // .ht.t.o // .ho.o // "unknown")')
-          
-          if [ "$resolved_sha" == "unknown" ]; then
-            echo "::error::Ref/Hash '$ksu_ref' does not exist in $KSU_REPO_OWNER/$KSU_REPO_NAME"
-            exit 1
-          fi
-          
-          echo "  ✅ Resolved: $ksu_type/$ksu_ref → $resolved_sha"
           echo "ksu_resolved_hash=$resolved_sha" >> "$GITHUB_OUTPUT"
           
           # Inject ksu_resolved_hash into each device in the matrix
@@ -293,64 +363,64 @@ jobs:
           declare -A susfs_hashes
           declare -A susfs_versions_per_key
           
-          for key in "${active_keys[@]}"; do
-            default_val="${default_branches[$key]}"
-            user_val="${user_inputs[$key]:-$default_val}"
-            
-            # Build GraphQL query — include blob fetch only when releasing
-            HASH_QUERY="{ project(fullPath: \"${GITLAB_PROJECT_PATH}\") { repository { ch: commit(ref: \"${user_val}\") { sha } } } }"
-            RELEASE_QUERY="{ project(fullPath: \"${GITLAB_PROJECT_PATH}\") { repository { ch: commit(ref: \"${user_val}\") { sha } blobs(paths: [\"kernel_patches/include/linux/susfs.h\"], ref: \"${user_val}\") { nodes { rawBlob } } } } }"
-            
-            if [ "${{ inputs.make_release }}" = "true" ]; then
-              GL_QUERY="$RELEASE_QUERY"
-            else
-              GL_QUERY="$HASH_QUERY"
-            fi
-            
-            MAX_RETRIES=3
-            RETRY_COUNT=0
-            RETRY_DELAY=5
-            resolved=""
-            
-            until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
-              RESPONSE=$(curl -s --fail -G "https://gitlab.com/api/graphql" --data-urlencode "query=$GL_QUERY")
-              EXIT_CODE=$?
+          if [ "${{ inputs.enable_ksu_susfs }}" == "false" ]; then
+            echo "🔍 KSU/SuSFS disabled, skipping SUSFS hashes resolution."
+          else
+            for key in "${active_keys[@]}"; do
+              default_val="${default_branches[$key]}"
+              user_val="${user_inputs[$key]:-$default_val}"
               
-              if [ $EXIT_CODE -eq 0 ] && [ -n "$RESPONSE" ]; then
-                resolved=$(echo "$RESPONSE" | jq -r '.data.project.repository.ch.sha // empty')
-                if [ -n "$resolved" ] && [ "$resolved" != "null" ]; then
-                  echo "  ✅ Query for $key Success"
-                  
-                  if [ "${{ inputs.make_release }}" = "true" ]; then
-                    extracted=$(echo "$RESPONSE" | jq -r '.data.project.repository.blobs.nodes[0].rawBlob // empty' | grep '#define SUSFS_VERSION' | awk -F'"' '{print $2}')
-                    susfs_versions_per_key[$key]="${extracted:-unknown}"
-                    echo "  ✅ $key → SUSFS_VERSION = ${extracted:-unknown}"
-                  fi
-                  
-                  break
-                fi
+              HASH_QUERY="{ project(fullPath: \"${GITLAB_PROJECT_PATH}\") { repository { ch: commit(ref: \"${user_val}\") { sha } } } }"
+              RELEASE_QUERY="{ project(fullPath: \"${GITLAB_PROJECT_PATH}\") { repository { ch: commit(ref: \"${user_val}\") { sha } blobs(paths: [\"kernel_patches/include/linux/susfs.h\"], ref: \"${user_val}\") { nodes { rawBlob } } } } }"
+              
+              if [ "${{ inputs.make_release }}" = "true" ]; then
+                GL_QUERY="$RELEASE_QUERY"
+              else
+                GL_QUERY="$HASH_QUERY"
               fi
               
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "::warning::GitLab GraphQL API failed (Attempt $RETRY_COUNT/$MAX_RETRIES). Retrying..."
-              sleep $RETRY_DELAY
+              MAX_RETRIES=3
+              RETRY_COUNT=0
+              RETRY_DELAY=5
+              resolved=""
+              
+              until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+                RESPONSE=$(curl -s --fail -G "https://gitlab.com/api/graphql" --data-urlencode "query=$GL_QUERY")
+                EXIT_CODE=$?
+                
+                if [ $EXIT_CODE -eq 0 ] && [ -n "$RESPONSE" ]; then
+                  resolved=$(echo "$RESPONSE" | jq -r '.data.project.repository.ch.sha // empty')
+                  if [ -n "$resolved" ] && [ "$resolved" != "null" ]; then
+                    echo "  ✅ Query for $key Success"
+                    
+                    if [ "${{ inputs.make_release }}" = "true" ]; then
+                      extracted=$(echo "$RESPONSE" | jq -r '.data.project.repository.blobs.nodes[0].rawBlob // empty' | grep '#define SUSFS_VERSION' | awk -F'"' '{print $2}')
+                      susfs_versions_per_key[$key]="${extracted:-unknown}"
+                      echo "  ✅ $key → SUSFS_VERSION = ${extracted:-unknown}"
+                    fi
+                    break
+                  fi
+                fi
+                
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                echo "::warning::GitLab GraphQL API failed (Attempt $RETRY_COUNT/$MAX_RETRIES). Retrying..."
+                sleep $RETRY_DELAY
+              done
+              
+              if [ -z "$resolved" ] || [ "$resolved" = "null" ]; then
+                echo "::error::Could not resolve SUSFS ref '$user_val' for $key on GitLab."
+                exit 1
+              fi
+              
+              if [ "${{ inputs.make_release }}" = "true" ] && [ "${susfs_versions_per_key[$key]:-unknown}" = "unknown" ]; then
+                echo "::error::Could not extract SUSFS_VERSION from susfs.h for '$key' after $MAX_RETRIES attempts. Cannot proceed with release."
+                exit 1
+              fi
+              
+              susfs_hashes["$key"]="$resolved"
+              echo "  ✅ Resolved: $key → $resolved"
             done
-            
-            # Final Validation — SUSFS hash
-            if [ -z "$resolved" ] || [ "$resolved" = "null" ]; then
-              echo "::error::Could not resolve SUSFS ref '$user_val' for $key on GitLab."
-              exit 1
-            fi
-            
-            # Final Validation — SUSFS version
-            if [ "${{ inputs.make_release }}" = "true" ] && [ "${susfs_versions_per_key[$key]:-unknown}" = "unknown" ]; then
-              echo "::error::Could not extract SUSFS_VERSION from susfs.h for '$key' after $MAX_RETRIES attempts. Cannot proceed with release."
-              exit 1
-            fi
-            
-            susfs_hashes["$key"]="$resolved"
-            echo "  ✅ Resolved: $key → $resolved"
-          done
+          fi
           
           # Write CSV list of active GKI versions
           active_gki_keys_csv=$(IFS=','; echo "${active_keys[*]:-}")
@@ -697,6 +767,11 @@ jobs:
           clean: ${{ inputs.clean_build }}
           debug: ${{ inputs.debug }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          enable_optimizations: ${{ inputs.enable_optimizations }}
+          create_patched_img: ${{ inputs.create_patched_img }}
+          zram_compression: ${{ inputs.zram_compression }}
+          custom_kernel_suffix: ${{ inputs.custom_kernel_suffix }}
+          use_stock_version: ${{ inputs.use_stock_version }}
 
       - name: 📊 Build statistics
         id: build-stat
@@ -1241,7 +1316,7 @@ jobs:
 
       - name: 📤 Upload Release Assets Dynamically
         run: |
-          for file in ./downloaded-artifacts/*.zip; do
+          for file in ./downloaded-artifacts/*.{zip,img}; do
             if [ -f "$file" ]; then
               echo "Uploading $file..."
               gh release upload "${{ env.NEW_TAG }}" "$file" --clobber
@@ -1263,7 +1338,7 @@ jobs:
           ### 📦 Assets
           EOF
           
-          for zip in ./downloaded-artifacts/*.zip; do
+          for zip in ./downloaded-artifacts/*.{zip,img}; do
             if [ -f "$zip" ]; then
               name=$(basename "$zip")
               size=$(stat -c%s "$zip")
