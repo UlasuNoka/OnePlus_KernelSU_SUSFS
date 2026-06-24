@@ -1654,7 +1654,7 @@ runs:
         cd "$COMMON_KERNEL_FOLDER"
         : > "$COMMON_KERNEL_FOLDER/.scmversion"
         
-        export PYTHONWARNINGS="${PYTHONWARNINGS}"
+        export PYTHONWARNINGS="${PYTHONWARNINGS:-}"
         
         echo "Getting last commit timestamp from kernel source..."
         COMMIT_TIMESTAMP=$(git log -1 --format=%ct 2>/dev/null || echo "$(date +%s)")
