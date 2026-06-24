@@ -1743,10 +1743,18 @@ runs:
           STOCK_BOOT="$GITHUB_WORKSPACE/assets/stock_images/${OP_MODEL}/boot.img"
           if [ -f "$STOCK_BOOT" ]; then
             echo "📥 Extracting precise kernel version from stock boot.img..."
-            wget -qO magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+            
+            MAGISK_URL=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep "browser_download_url.*Magisk-v.*\.apk" | cut -d '"' -f 4 | head -n1)
+            if [ -z "$MAGISK_URL" ]; then
+              echo "❌ Could not retrieve Magisk APK URL"
+              exit 1
+            fi
+            echo "🔗 Downloading: $MAGISK_URL"
+            wget -qO magisk.apk "$MAGISK_URL"
             unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
             mv libmagiskboot.so magiskboot
             chmod +x magiskboot
+            
             ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1
             if [ -f "kernel" ]; then
                STOCK_UNAME=$(strings kernel | grep -oP '^Linux version \K[^\s]+' | head -n1)
@@ -2093,8 +2101,13 @@ runs:
         if [ -f "$STOCK_BOOT" ]; then
           echo "Found stock boot.img at $STOCK_BOOT"
           
-          # Витягуємо magiskboot з офіційного Magisk APK
-          wget -qO magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          MAGISK_URL=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep "browser_download_url.*Magisk-v.*\.apk" | cut -d '"' -f 4 | head -n1)
+          if [ -z "$MAGISK_URL" ]; then
+            echo "❌ Could not retrieve Magisk APK URL"
+            exit 1
+          fi
+          echo "🔗 Downloading Magisk for repacking from: $MAGISK_URL"
+          wget -qO magisk.apk "$MAGISK_URL"
           unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
           mv libmagiskboot.so magiskboot
           chmod +x magiskboot
