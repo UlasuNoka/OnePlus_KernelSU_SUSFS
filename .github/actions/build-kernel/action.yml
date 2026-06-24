@@ -1743,9 +1743,11 @@ runs:
           STOCK_BOOT="$GITHUB_WORKSPACE/assets/stock_images/${OP_MODEL}/boot.img"
           if [ -f "$STOCK_BOOT" ]; then
             echo "📥 Extracting precise kernel version from stock boot.img..."
-            wget -q https://github.com/xiaolu/magiskboot/releases/download/v26.0/magiskboot_x86_64
-            chmod +x magiskboot_x86_64
-            ./magiskboot_x86_64 unpack "$STOCK_BOOT" >/dev/null 2>&1
+            wget -qO magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+            mv libmagiskboot.so magiskboot
+            chmod +x magiskboot
+            ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1
             if [ -f "kernel" ]; then
                STOCK_UNAME=$(strings kernel | grep -oP '^Linux version \K[^\s]+' | head -n1)
                echo "📌 Stock kernel exact uname: $STOCK_UNAME"
@@ -1754,7 +1756,7 @@ runs:
                echo "✂️  Extracted localversion suffix: $LOCAL_LOCALVERSION"
                rm -f kernel ramdisk.cpio header
             fi
-            rm -f magiskboot_x86_64
+            rm -f magiskboot magisk.apk
           else
             echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Falling back to default or manual suffix."
             if [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
@@ -2091,15 +2093,18 @@ runs:
         if [ -f "$STOCK_BOOT" ]; then
           echo "Found stock boot.img at $STOCK_BOOT"
           
-          # Завантаження Linux x86_64 версії magiskboot
-          wget -q https://github.com/xiaolu/magiskboot/releases/download/v26.0/magiskboot_x86_64
-          chmod +x magiskboot_x86_64
+          # Витягуємо magiskboot з офіційного Magisk APK
+          wget -qO magisk.apk https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk
+          unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+          mv libmagiskboot.so magiskboot
+          chmod +x magiskboot
+          rm -f magisk.apk
           
           mkdir -p tmp_boot && cd tmp_boot
           cp "$STOCK_BOOT" ./boot.img
           
           echo "Unpacking stock boot.img..."
-          ../magiskboot_x86_64 unpack boot.img
+          ../magiskboot unpack boot.img
           
           # Знаходимо збудоване ядро
           IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
@@ -2113,7 +2118,7 @@ runs:
           cp "$IMAGE_PATH" ./kernel
           
           echo "Repacking patched boot.img..."
-          ../magiskboot_x86_64 repack boot.img patched_boot.img
+          ../magiskboot repack boot.img patched_boot.img
           
           FINAL_IMG_NAME="Patched_boot_${OP_MODEL}_${OP_OS_VERSION}.img"
           mv patched_boot.img "$ARTIFACTS_FOLDER/$FINAL_IMG_NAME"
