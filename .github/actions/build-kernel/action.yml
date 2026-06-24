@@ -1744,16 +1744,31 @@ runs:
           if [ -f "$STOCK_BOOT" ]; then
             echo "📥 Extracting precise kernel version from stock boot.img..."
             
-            MAGISK_URL=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep "browser_download_url.*Magisk-v.*\.apk" | cut -d '"' -f 4 | head -n1)
-            if [ -z "$MAGISK_URL" ]; then
-              echo "❌ Could not retrieve Magisk APK URL"
+            # Отримуємо масив URL-адрес усіх APK файлів з останніх релізів Magisk
+            MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
+            
+            for URL in $MAGISK_RELEASES; do
+              echo "🔄 Testing magiskboot from: $(basename "$URL")"
+              wget -qO magisk.apk "$URL"
+              unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+              mv libmagiskboot.so magiskboot
+              chmod +x magiskboot
+              
+              # Тестуємо запуск утиліти. Якщо помилка 132 (Illegal instruction) - йдемо далі
+              ./magiskboot --help >/dev/null 2>&1 || RET=$?
+              if [ "${RET:-0}" != "132" ]; then
+                 echo "✅ Found working magiskboot compatible with this CPU!"
+                 rm -f magisk.apk
+                 break
+              fi
+              echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
+              rm -f magiskboot magisk.apk
+            done
+
+            if [ ! -f "magiskboot" ]; then
+              echo "❌ Could not find any compatible magiskboot version."
               exit 1
             fi
-            echo "🔗 Downloading: $MAGISK_URL"
-            wget -qO magisk.apk "$MAGISK_URL"
-            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
-            mv libmagiskboot.so magiskboot
-            chmod +x magiskboot
             
             ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1
             if [ -f "kernel" ]; then
@@ -1764,7 +1779,7 @@ runs:
                echo "✂️  Extracted localversion suffix: $LOCAL_LOCALVERSION"
                rm -f kernel ramdisk.cpio header
             fi
-            rm -f magiskboot magisk.apk
+            rm -f magiskboot
           else
             echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Falling back to default or manual suffix."
             if [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
@@ -2101,17 +2116,29 @@ runs:
         if [ -f "$STOCK_BOOT" ]; then
           echo "Found stock boot.img at $STOCK_BOOT"
           
-          MAGISK_URL=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases/latest | grep "browser_download_url.*Magisk-v.*\.apk" | cut -d '"' -f 4 | head -n1)
-          if [ -z "$MAGISK_URL" ]; then
-            echo "❌ Could not retrieve Magisk APK URL"
+          MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
+          
+          for URL in $MAGISK_RELEASES; do
+            echo "🔄 Testing magiskboot from: $(basename "$URL")"
+            wget -qO magisk.apk "$URL"
+            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+            mv libmagiskboot.so magiskboot
+            chmod +x magiskboot
+            
+            ./magiskboot --help >/dev/null 2>&1 || RET=$?
+            if [ "${RET:-0}" != "132" ]; then
+               echo "✅ Found working magiskboot compatible with this CPU!"
+               rm -f magisk.apk
+               break
+            fi
+            echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
+            rm -f magiskboot magisk.apk
+          done
+
+          if [ ! -f "magiskboot" ]; then
+            echo "❌ Could not find any compatible magiskboot version."
             exit 1
           fi
-          echo "🔗 Downloading Magisk for repacking from: $MAGISK_URL"
-          wget -qO magisk.apk "$MAGISK_URL"
-          unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
-          mv libmagiskboot.so magiskboot
-          chmod +x magiskboot
-          rm -f magisk.apk
           
           mkdir -p tmp_boot && cd tmp_boot
           cp "$STOCK_BOOT" ./boot.img
