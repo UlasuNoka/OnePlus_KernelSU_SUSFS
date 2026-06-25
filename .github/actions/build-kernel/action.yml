@@ -1744,6 +1744,8 @@ runs:
           if [ -f "$STOCK_BOOT" ]; then
             echo "📥 Extracting precise kernel version from stock boot.img..."
             
+            mkdir -p tmp_version_extract && cd tmp_version_extract
+
             # Додали v28.1 та v28.0. Якщо сервер їх "потягне" - чудово! Якщо ні - впаде на v27.0
             SAFE_VERSIONS=("v28.1" "v28.0" "v27.0" "v26.4" "v26.1")
             MAGISK_WORKING=false
@@ -1774,17 +1776,24 @@ runs:
               exit 1
             fi
             
+           # --- Початок змін 2 ---
             if [ -f "kernel" ]; then
                STOCK_UNAME=$(strings kernel | grep -oP '^Linux version \K[^\s]+' | head -n1)
                echo "📌 Stock kernel exact uname: $STOCK_UNAME"
+               
+               # Повертаємося в код ядра, бо інакше команда 'make' видасть помилку!
+               cd "$COMMON_KERNEL_FOLDER"
                BASE_VER=$(make kernelversion)
                LOCAL_LOCALVERSION="${STOCK_UNAME#$BASE_VER}"
                echo "✂️  Extracted localversion suffix: $LOCAL_LOCALVERSION"
             else
-               echo "⚠️ Kernel binary not found after unpack."
+               # Якщо ядра немає, все одно повертаємось назад
+               cd "$COMMON_KERNEL_FOLDER"
             fi
-            # Прибираємо сміття
-            rm -f magiskboot kernel ramdisk.cpio header dtb
+            
+            # Просто видаляємо всю нашу ізольовану тимчасову папку
+            rm -rf tmp_version_extract
+            # --- Кінець змін 2 ---
           else
             echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Falling back to default or manual suffix."
             if [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
