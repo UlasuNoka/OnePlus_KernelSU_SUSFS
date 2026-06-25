@@ -2123,6 +2123,9 @@ runs:
         if [ -f "$STOCK_BOOT" ]; then
           echo "Found stock boot.img at $STOCK_BOOT"
           
+          mkdir -p tmp_boot && cd tmp_boot
+          cp "$STOCK_BOOT" ./boot.img
+          
           SAFE_VERSIONS=("v28.1" "v28.0" "v27.0" "v26.4" "v26.1")
           MAGISK_WORKING=false
           
@@ -2135,13 +2138,17 @@ runs:
             mv libmagiskboot.so magiskboot
             chmod +x magiskboot
             
-            # Мінімальний тест на працездатність перед використанням у tmp_boot
-            if ./magiskboot --version >/dev/null 2>&1; then
+            # РЕАЛЬНИЙ ТЕСТ: пробуємо розпакувати наш образ прямо тут
+            echo "Unpacking stock boot.img with v${VERSION}..."
+            if ./magiskboot unpack boot.img >/dev/null 2>&1; then
+               echo "✅ magiskboot ${VERSION} works perfectly and unpacked the image!"
                MAGISK_WORKING=true
                rm -f magisk.apk
                break
             fi
-            rm -f magiskboot magisk.apk
+            
+            echo "⚠️ magiskboot ${VERSION} crashed (Illegal instruction). Trying older..."
+            rm -f magiskboot magisk.apk kernel ramdisk.cpio header dtb
           done
 
           if [ "$MAGISK_WORKING" = "false" ]; then
@@ -2149,16 +2156,9 @@ runs:
             exit 1
           fi
           
-          mkdir -p tmp_boot && cd tmp_boot
-          cp "$STOCK_BOOT" ./boot.img
+          # Оскільки ми щойно успішно протестували unpack у циклі, файли вже розпаковані!
+          # Тому нам залишається лише знайти наше нове ядро і підмінити його.
           
-          echo "Unpacking stock boot.img..."
-          ../magiskboot unpack boot.img || {
-            echo "❌ Fatal: Unpack failed during repacking phase."
-            exit 1
-          }
-          
-          # Знаходимо збудоване ядро
           IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
           if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
             IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
@@ -2170,7 +2170,7 @@ runs:
           cp "$IMAGE_PATH" ./kernel
           
           echo "Repacking patched boot.img..."
-          ../magiskboot repack boot.img patched_boot.img
+          ./magiskboot repack boot.img patched_boot.img
           
           FINAL_IMG_NAME="Patched_boot_${OP_MODEL}_${OP_OS_VERSION}.img"
           mv patched_boot.img "$ARTIFACTS_FOLDER/$FINAL_IMG_NAME"
