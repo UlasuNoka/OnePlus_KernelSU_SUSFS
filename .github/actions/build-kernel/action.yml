@@ -1744,42 +1744,47 @@ runs:
           if [ -f "$STOCK_BOOT" ]; then
             echo "📥 Extracting precise kernel version from stock boot.img..."
             
-            # Отримуємо масив URL-адрес усіх APK файлів з останніх релізів Magisk
-            MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
+            # Додали v28.1 та v28.0. Якщо сервер їх "потягне" - чудово! Якщо ні - впаде на v27.0
+            SAFE_VERSIONS=("v28.1" "v28.0" "v27.0" "v26.4" "v26.1")
+            MAGISK_WORKING=false
             
-            for URL in $MAGISK_RELEASES; do
-              echo "🔄 Testing magiskboot from: $(basename "$URL")"
-              wget -qO magisk.apk "$URL"
-              unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+            for VERSION in "${SAFE_VERSIONS[@]}"; do
+              echo "🔄 Testing magiskboot from Magisk ${VERSION}..."
+              URL="https://github.com/topjohnwu/Magisk/releases/download/${VERSION}/Magisk-${VERSION}.apk"
+              
+              wget -qO magisk.apk "$URL" || continue
+              unzip -qj magisk.apk lib/x86_64/libmagiskboot.so 2>/dev/null || continue
               mv libmagiskboot.so magiskboot
               chmod +x magiskboot
               
-              # Тестуємо запуск утиліти. Якщо помилка 132 (Illegal instruction) - йдемо далі
-              ./magiskboot --help >/dev/null 2>&1 || RET=$?
-              if [ "${RET:-0}" != "132" ]; then
-                 echo "✅ Found working magiskboot compatible with this CPU!"
+              # Тестуємо РЕАЛЬНЕ розпакування
+              if ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1; then
+                 echo "✅ magiskboot ${VERSION} successfully unpacked boot.img!"
+                 MAGISK_WORKING=true
                  rm -f magisk.apk
                  break
               fi
-              echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
-              rm -f magiskboot magisk.apk
+              
+              echo "⚠️ magiskboot ${VERSION} failed (SIGILL or other error). Trying older version..."
+              rm -f magiskboot magisk.apk kernel ramdisk.cpio header dtb
             done
 
-            if [ ! -f "magiskboot" ]; then
+            if [ "$MAGISK_WORKING" = "false" ]; then
               echo "❌ Could not find any compatible magiskboot version."
               exit 1
             fi
             
-            ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1
             if [ -f "kernel" ]; then
                STOCK_UNAME=$(strings kernel | grep -oP '^Linux version \K[^\s]+' | head -n1)
                echo "📌 Stock kernel exact uname: $STOCK_UNAME"
                BASE_VER=$(make kernelversion)
                LOCAL_LOCALVERSION="${STOCK_UNAME#$BASE_VER}"
                echo "✂️  Extracted localversion suffix: $LOCAL_LOCALVERSION"
-               rm -f kernel ramdisk.cpio header
+            else
+               echo "⚠️ Kernel binary not found after unpack."
             fi
-            rm -f magiskboot
+            # Прибираємо сміття
+            rm -f magiskboot kernel ramdisk.cpio header dtb
           else
             echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Falling back to default or manual suffix."
             if [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
@@ -1789,6 +1794,7 @@ runs:
         elif [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
           LOCAL_LOCALVERSION="${{ inputs.custom_kernel_suffix }}"
         fi
+      
 
         if [ -n "${LOCAL_LOCALVERSION:-}" ]; then
           scripts/config --file "$OUT/.config" --set-str LOCALVERSION "${LOCAL_LOCALVERSION}"
@@ -2113,29 +2119,32 @@ runs:
         
         STOCK_BOOT="$GITHUB_WORKSPACE/assets/stock_images/${OP_MODEL}/boot.img"
         
+  
         if [ -f "$STOCK_BOOT" ]; then
           echo "Found stock boot.img at $STOCK_BOOT"
           
-          MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
+          SAFE_VERSIONS=("v28.1" "v28.0" "v27.0" "v26.4" "v26.1")
+          MAGISK_WORKING=false
           
-          for URL in $MAGISK_RELEASES; do
-            echo "🔄 Testing magiskboot from: $(basename "$URL")"
-            wget -qO magisk.apk "$URL"
-            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
+          for VERSION in "${SAFE_VERSIONS[@]}"; do
+            echo "🔄 Downloading magiskboot from Magisk ${VERSION}..."
+            URL="https://github.com/topjohnwu/Magisk/releases/download/${VERSION}/Magisk-${VERSION}.apk"
+            
+            wget -qO magisk.apk "$URL" || continue
+            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so 2>/dev/null || continue
             mv libmagiskboot.so magiskboot
             chmod +x magiskboot
             
-            ./magiskboot --help >/dev/null 2>&1 || RET=$?
-            if [ "${RET:-0}" != "132" ]; then
-               echo "✅ Found working magiskboot compatible with this CPU!"
+            # Мінімальний тест на працездатність перед використанням у tmp_boot
+            if ./magiskboot --version >/dev/null 2>&1; then
+               MAGISK_WORKING=true
                rm -f magisk.apk
                break
             fi
-            echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
             rm -f magiskboot magisk.apk
           done
 
-          if [ ! -f "magiskboot" ]; then
+          if [ "$MAGISK_WORKING" = "false" ]; then
             echo "❌ Could not find any compatible magiskboot version."
             exit 1
           fi
@@ -2144,7 +2153,10 @@ runs:
           cp "$STOCK_BOOT" ./boot.img
           
           echo "Unpacking stock boot.img..."
-          ../magiskboot unpack boot.img
+          ../magiskboot unpack boot.img || {
+            echo "❌ Fatal: Unpack failed during repacking phase."
+            exit 1
+          }
           
           # Знаходимо збудоване ядро
           IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
@@ -2169,6 +2181,7 @@ runs:
           echo "💡 Tip: To generate it, place the file exactly at: $STOCK_BOOT"
         fi
         echo "::endgroup::"
+
 
     - name: Final Build Summary
       shell: bash
