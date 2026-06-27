@@ -7,7 +7,7 @@
   "kernel_version": "6.6",
   "os_version": "OOS16",
   "lto": "thin",
-  "zyc_compiler": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz",
+  "zyc_compiler": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel/clang-r584948b.tar.gz",
   "c_compiler": "",
   "rust_compiler": "",
   "bindgen": "",
