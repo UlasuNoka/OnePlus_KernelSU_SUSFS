@@ -59,11 +59,11 @@ on:
         type: string
         default: ''
       zram_compression:
-        description: 'Default ZRAM compression algorithm'
+        description: 'Default ZRAM compression algorithm (none keeps the defconfig default)'
         required: false
         type: choice
-        options: [lz4, zstd, lzo, lzo-rle]
-        default: ''
+        options: [none, lz4, zstd, lzo, lzo-rle]
+        default: 'none'
 
 jobs:
   set-op-model:

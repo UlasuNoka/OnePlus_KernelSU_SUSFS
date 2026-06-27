@@ -28,8 +28,8 @@ inputs:
     description: 'Kernel localversion suffix'
     default: ''
   zram_compression:
-    description: 'Default ZRAM compression algorithm'
-    default: 'lz4'
+    description: 'Default ZRAM compression algorithm (none keeps the defconfig default)'
+    default: 'none'
 
 
 outputs:
@@ -1123,7 +1123,7 @@ runs:
       shell: bash
       run: |
         ALGO="${{ inputs.zram_compression }}"
-        if [ -z "$ALGO" ]; then
+        if [ -z "$ALGO" ] || [ "$ALGO" = "none" ]; then
           echo "ℹ️ ZRAM compression not specified; keeping defconfig default"
           exit 0
         fi
@@ -1291,6 +1291,12 @@ runs:
         make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" gki_defconfig
         
         LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:-}"
+
+        if [ -n "${{ inputs.kernel_localversion }}" ]; then
+          echo "ℹ️ Explicit kernel_localversion supplied; skipping branding suffix to avoid double localversion"
+          LOCAL_LOCALVERSION=""
+        fi
+
         if [ -n "${LOCAL_LOCALVERSION:-}" ]; then
           scripts/config --file "$OUT/.config" --set-str LOCALVERSION "${LOCAL_LOCALVERSION}"
           scripts/config --file "$OUT/.config" -d LOCALVERSION_AUTO || true
