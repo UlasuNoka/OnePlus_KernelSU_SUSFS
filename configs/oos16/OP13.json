@@ -14,7 +14,6 @@
   "rust_build": false,
   "disk_cleanup": false,
   "hmbird": true,
-  "susfs": true,
   "ds": true,
   "bbg": true,
   "bbr": true,
@@ -22,5 +21,5 @@
   "ip_set": true,
   "unicode": true,
   "ntsync": true,
-  "uname": "OP-WILD"
+  "uname": "OP"
 }

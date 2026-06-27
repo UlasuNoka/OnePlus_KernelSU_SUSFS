@@ -1,90 +1,41 @@
-name: 'Build OnePlus Kernel with KernelSU Next'
+name: 'Build OnePlus Kernel'
+description: 'Build a OnePlus kernel from a device config using a composite GitHub Action.'
 
 inputs:
   op_config_json:
     description: 'JSON string containing full device config'
     required: true
-    type: string
-  ksu_type:
-    description: 'Select KSU Type'
-    required: true
-    type: choice
-    options:
-      - KSUN
-      - KSU
-      - NONE
-  ksu_branch_or_hash:
-    description: 'KSU branch or commit hash (empty = auto-detect by ksu_type)'
-    required: false
-    type: string
-    default: ""
-  susfs_commit_hash_or_branch:
-    description: 'SUSFS branch or commit hash (empty = auto-detect by kernel version)'
-    required: false
-    type: string
-    default: ""
   build_timestamp:
     description: 'Custom kernel build timestamp shown in uname -a (e.g. "Tue Feb 10 10:01:02 UTC 2026"). Leave empty to use the current build time.'
     required: false
-    type: string
     default: ''
   optimize_level:
     description: 'Compiler optimization level (O2 or O3)'
     required: false
-    type: string
     default: O2
   clean:
     description: 'Force clean build without ccache acceleration'
     required: false
-    type: boolean
-    default: false
+    default: 'false'
   debug:
     description: 'Enable dumping debug related artifacts'
     required: false
-    type: boolean
-    default: false
+    default: 'false'
   github_token:
     description: 'GitHub Token'
     required: true
-  enable_optimizations:
-    description: 'Enable general kernel optimizations'
-    required: false
-    type: boolean
-    default: true
-  create_patched_img:
-    description: 'Create patched boot.img using magiskboot'
-    required: false
-    type: boolean
-    default: true
-  zram_compression:
-    description: 'ZRAM compression algorithm'
-    required: false
-    type: string
-    default: 'lz4'
-  custom_kernel_suffix:
-    description: 'Manual custom kernel suffix'
-    required: false
-    type: string
+  kernel_localversion:
+    description: 'Kernel localversion suffix'
     default: ''
-  use_stock_version:
-    description: 'Auto extract version from boot.img'
-    required: false
-    type: boolean
-    default: false
+  zram_compression:
+    description: 'Default ZRAM compression algorithm'
+    default: 'lz4'
+
 
 outputs:
   kernel_version:
     description: 'Full kernel version string'
     value: ${{ steps.save_metadata.outputs.kernel_version }}
-  ksu_version:
-    description: 'KernelSU version number'
-    value: ${{ steps.save_metadata.outputs.ksu_version }}
-  ksu_type:
-    description: 'KernelSU Variant'
-    value: ${{ steps.save_metadata.outputs.ksu_type }}
-  susfs_version:
-    description: 'SUSFS version string'
-    value: ${{ steps.save_metadata.outputs.susfs_version }}
   build_timestamp:
     description: 'Effective kernel build timestamp used in uname -a'
     value: ${{ steps.save_metadata.outputs.build_timestamp }}
@@ -153,7 +104,6 @@ runs:
         kernel_version="$OP_KERNEL_VERSION"
         os_version="$OP_OS_VERSION"
         hmbird="$OP_HMBIRD"
-        susfs="$OP_SUSFS"
         bbg="$OP_BBG"
         bbr="$OP_BBR"
         ttl="$OP_TTL"
@@ -230,12 +180,6 @@ runs:
           errors+=("Input 'hmbird' cannot be empty")
         elif [[ "$hmbird" != "true" && "$hmbird" != "false" ]]; then
           errors+=("Input 'hmbird' contains invalid characters. Allowed: 'true' or 'false'. Got: '$hmbird'")
-        fi
-        
-        if [[ -z "$susfs" ]]; then
-          errors+=("Input 'susfs' cannot be empty")
-        elif [[ "$susfs" != "true" && "$susfs" != "false" ]]; then
-          errors+=("Input 'susfs' contains invalid characters. Allowed: 'true' or 'false'. Got: '$susfs'")
         fi
         
         if [[ -z "$bbg" ]]; then
@@ -366,9 +310,6 @@ runs:
         AK3_DIR="$CONFIG_DIR/AnyKernel3"
         DEBUG_ARTIFACTS_DIR="$GITHUB_WORKSPACE/debug_artifacts"
         KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
-        SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
-        KSU_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
-        KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU-Next"
         mkdir -p "$ARTIFACTS_DIR"
         mkdir -p "$DEBUG_ARTIFACTS_DIR"
         
@@ -381,9 +322,6 @@ runs:
         echo "AK3_FOLDER=$AK3_DIR" >> "$GITHUB_ENV"
         echo "DEBUG_ARTIFACTS_FOLDER=$DEBUG_ARTIFACTS_DIR" >> "$GITHUB_ENV"
         echo "KERNEL_PATCHES_FOLDER=$KERNEL_PATCHES_DIR" >> "$GITHUB_ENV"
-        echo "SUSFS_FOLDER=$SUSFS_DIR" >> "$GITHUB_ENV"
-        echo "KSU_FOLDER=$KSU_DIR" >> "$GITHUB_ENV"
-        echo "KSUN_FOLDER=$KSUN_DIR" >> "$GITHUB_ENV"
         
         DEBUG_ZIP_NAME="debug_${OP_MODEL}_${OP_OS_VERSION}.zip"
         echo "DEBUG_ZIP_NAME=$DEBUG_ZIP_NAME" >> "$GITHUB_ENV"
@@ -395,6 +333,23 @@ runs:
         set -euo pipefail
         echo "${KERNEL_PLATFORM_FOLDER}/prebuilts/kernel-build-tools/linux-x86/bin/" >> $GITHUB_PATH
         echo "${KERNEL_PLATFORM_FOLDER}/prebuilts/kernel-build-tools/linux_musl-x86/bin/" >> $GITHUB_PATH
+
+    - name: 🏷️ Override Kernel Localversion
+      shell: bash
+      run: |
+        LOCALVER="${{ inputs.kernel_localversion }}"
+        if [ -n "$LOCALVER" ]; then
+          cd "$COMMON_KERNEL_FOLDER"
+
+          printf '#!/bin/sh\necho "%s"\n' "$LOCALVER" > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+
+          echo "$LOCALVER" > .scmversion
+
+          echo "✅ Kernel version: $(make -s kernelversion)${LOCALVER}"
+        else
+          echo "ℹ️  Localversion: auto (git hash)"
+        fi
 
     - name: Get Kernel Version Info
       shell: bash
@@ -438,15 +393,9 @@ runs:
           echo "KERNEL_VER=$VERSION.$PATCHLEVEL"
           echo "TKERNEL_VER=$FULL_VERSION"
           echo "KERNEL_FULL_VER=$ANDROID_VERSION-$FULL_VERSION"
-          if [ "${{ env.OP_SUSFS }}" = true ]; then
-            echo "SUSFS_KERNEL_BRANCH=gki-$ANDROID_VERSION-$VERSION.$PATCHLEVEL"
-          fi
         } >> "$GITHUB_ENV"
         
         echo "✅ Detected: $ANDROID_VERSION-$FULL_VERSION"
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          echo "   SUSFS Branch: gki-$ANDROID_VERSION-$VERSION.$PATCHLEVEL"
-        fi
         echo "::endgroup::"
 
     - name: 🏷️ Set Build Identity (Hardcoded)
@@ -694,12 +643,12 @@ runs:
       if: ${{ inputs.clean == false || inputs.clean == 'false' }}
       with:
         cache_path: ${{ env.CCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_key: kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         cache_bucket: "ccache-cache"
         debug: ${{ inputs.debug }}
         restore_keys: |
-          ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
-          ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
+          kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
+          kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
 
     - name: Restore LTO LD cache
       id: restore-lto-ld-cache
@@ -707,12 +656,12 @@ runs:
       if: ${{ (inputs.clean == false && env.OP_LTO != 'none') || (inputs.clean == 'false' && env.OP_LTO != 'none') }}
       with:
         cache_path: ${{ env.LDCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_key: kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         cache_bucket: "lto-cache"
         debug: ${{ inputs.debug }}
         restore_keys: |
-          ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
-          ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
+          kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-
+          kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-
 
     - name: Check and Prepare Caches
       shell: bash
@@ -751,96 +700,71 @@ runs:
         fi
         echo "::endgroup::"
 
-    - name: Fetch SusFS and Other Dependencies
+    - name: Fetch Dependencies
       shell: bash
       run: |
         echo "::group::Fetch dependencies"
         set -euo pipefail
-        echo "Fetching SusFS and other dependencies..."
-        
-        
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          # Determine SUSFS branch/commit to use
-          SUSFS_INPUT="${{ inputs.susfs_commit_hash_or_branch }}"
-          
-          # Default SUSFS branches for each kernel version
-          declare -A DEFAULT_SUSFS=(
-            ["android12-5.10"]="gki-android12-5.10"
-            ["android13-5.15"]="gki-android13-5.15"
-            ["android14-6.1"]="gki-android14-6.1"
-            ["android15-6.6"]="gki-android15-6.6"
-            ["android16-6.12"]="gki-android16-6.12"
-          )
-          
-          # Determine which SUSFS ref to use
-          KERNEL_KEY="${{ env.ANDROID_VER }}-${{ env.KERNEL_VER }}"
-          if [ -z "$SUSFS_INPUT" ]; then
-            # use kernel-specific default
-            SUSFS_BRANCH="${DEFAULT_SUSFS[$KERNEL_KEY]:-gki-android15-6.6}"
-            echo "ℹ️  Using default SUSFS branch for $KERNEL_KEY: $SUSFS_BRANCH"
-          else
-            # 40-char hash or branch/commit passed directly
-            SUSFS_BRANCH="$SUSFS_INPUT"
-            echo "🔧 Using resolved SUSFS ref: $SUSFS_BRANCH"
-          fi
-        fi
-        
+
         retry_fetch_archive() {
           local url="$1"
           local branch="${2:-main}"
           local max_attempts=3
           local attempt=1
-          
+
           local repo_name=$(basename "$url" .git)
           local safe_branch=$(echo "$branch" | tr '/' '_')
           local archive_name="${repo_name}_${safe_branch}.tar.gz"
           local shm_path="/dev/shm/$archive_name"
-          
+
           local nproc=$(nproc 2>/dev/null || echo 4)
-          
+
           local aria_log_flags="--quiet --summary-interval=0"
           if [ "${{ inputs.debug }}" = "true" ]; then
-              aria_log_flags="--summary-interval=5" # Show progress every 5s in debug
+            aria_log_flags="--summary-interval=5"
           fi
-          
+
           local aria2_headers=(
             "--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             "--header=Accept: */*"
             "--header=Connection: keep-alive"
           )
-          
+
           local download_url=""
           if [[ "$url" == *"github.com"* ]]; then
-              download_url="${url%.git}/archive/refs/heads/${branch}.tar.gz"
+            download_url="${url%.git}/archive/refs/heads/${branch}.tar.gz"
           elif [[ "$url" == *"gitlab.com"* ]]; then
-              download_url="${url%.git}/-/archive/${branch}/${repo_name}-${branch}.tar.gz"
+            download_url="${url%.git}/-/archive/${branch}/${repo_name}-${branch}.tar.gz"
           else
-              echo "::error::Unsupported host: $url"
-              return 1
+            echo "::error::Unsupported host: $url"
+            return 1
           fi
-          
+
           while [ $attempt -le $max_attempts ]; do
-              echo " Attempt $attempt/$max_attempts: High-speed fetch for $repo_name ($branch)"
-              
-              if aria2c -x16 -s16 -j16 -k1M --retry-wait=2 --max-tries=5 -d "/dev/shm" -o "$archive_name" --allow-overwrite=true "${aria2_headers[@]}" $aria_log_flags "$download_url"; then
-                  mkdir -p "$repo_name"
-                  if tar -I "pigz -p $nproc -b 256" -x --record-size=1M -f "$shm_path" -C "$repo_name" --strip-components=1 --no-same-owner; then
-                      echo "✅ Success: $repo_name synced"
-                      rm -f "$shm_path"
-                      return 0
-                  fi
+            echo " Attempt $attempt/$max_attempts: High-speed fetch for $repo_name ($branch)"
+
+            if aria2c -x16 -s16 -j16 -k1M --retry-wait=2 --max-tries=5 \
+                -d "/dev/shm" -o "$archive_name" --allow-overwrite=true \
+                "${aria2_headers[@]}" $aria_log_flags "$download_url"; then
+              mkdir -p "$repo_name"
+              if tar -I "pigz -p $nproc -b 256" -x --record-size=1M \
+                  -f "$shm_path" -C "$repo_name" --strip-components=1 --no-same-owner; then
+                echo "✅ Success: $repo_name synced"
+                rm -f "$shm_path"
+                return 0
               fi
-              
-              echo "⚠️ Attempt $attempt failed, clearing RAM and retrying..."
-              rm -rf "$repo_name" "$shm_path" 2>/dev/null
-              sleep 5
-              attempt=$((attempt + 1))
+            fi
+
+            echo "⚠️ Attempt $attempt failed, clearing RAM and retrying..."
+            rm -rf "$repo_name" "$shm_path" 2>/dev/null
+            sleep 5
+            attempt=$((attempt + 1))
           done
-          
+
           echo "::error::All attempts failed for $url"
           return 1
         }
-        
+
         retry_clone() {
           local url="$1"
           local branch="${2:-main}"
@@ -848,41 +772,31 @@ runs:
           local dir="$(basename "$url" .git)"
           local max_attempts=3
           local attempt=1
-          
-          # Build git clone args
+
           local clone_args=(--branch "$branch")
           if [ "$depth" != "0" ] && [ -n "$depth" ]; then
             clone_args+=(--depth "$depth")
           fi
-          
+
           while [ $attempt -le $max_attempts ]; do
             echo "🔄 Attempt $attempt/$max_attempts: cloning $url ($branch)${depth:+ [depth=$depth]}"
-            
-            # Clone with dynamic args
+
             git clone "${clone_args[@]}" "$url" "$dir" && {
               echo "✅ Success"
               return 0
             }
-            
+
             echo "❌ Failed, cleaning up..."
             rm -rf "$dir" 2>/dev/null
             sleep $((attempt++ * 5))
           done
-          
+
           echo "💥 All attempts failed"
           return 1
         }
-        
+
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
-        
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
-          if ! retry_fetch_archive "https://gitlab.com/simonpunk/susfs4ksu.git" "$SUSFS_BRANCH"; then
-            echo "::error::Failed to fetch SUSFS archive after multiple attempts"
-            exit 1
-          fi
-          echo "SUSFS_COMMIT_SHA=$SUSFS_BRANCH" >> $GITHUB_ENV
-        fi
+
         echo "✅ Dependencies cloned"
         echo "::endgroup::"
 
@@ -894,374 +808,6 @@ runs:
         cd "$KERNEL_PLATFORM_FOLDER"
         rm -f common/android/abi_gki_protected_exports_* || true
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
-        echo "::endgroup::"
-
-    - name: Add KernelSU Next
-      shell: bash
-      if: ${{ inputs.ksu_type == 'KSUN' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Add KernelSU Next"
-        cd "$KERNEL_PLATFORM_FOLDER"
-        echo "Adding KernelSU Next..."
-        KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
-        if [ -z "$KSU_INPUT" ]; then
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
-        else
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
-        fi
-        git submodule update --init --recursive
-        cd KernelSU-Next/kernel
-        
-        COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
-        
-        if [ $COMMITS_COUNT -lt 2684 ]; then
-          BASE_VERSION=10200
-        else
-          BASE_VERSION=30000
-        fi
-        
-        KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
-        sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-        
-        if [ -f ksu.c ]; then
-          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
-        fi
-        
-        if [[ "$KSU_VERSION" -gt 33095 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
-          sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
-          sed -i 's|$(src)|$(abspath $(src))|' Kbuild
-          sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
-        fi
-        
-        if [ "$KSU_VERSION" -lt 12884 ]; then
-          echo "NEED_HOOKS=true" >> $GITHUB_ENV
-        else
-          echo "NEED_HOOKS=false" >> $GITHUB_ENV
-        fi
-        
-        cd ..
-        KSU_COMMIT_SHA=$(git rev-parse HEAD)
-        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
-        
-        
-        echo "Add KSUN Configuration Settings"
-        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_KSU=y
-        CONFIG_KSU_KPROBES_HOOK=n
-        EOF
-        
-        echo "KSUN" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-        echo "KernelSU Next Version: $KSU_VERSION"
-        echo "✅ KernelSU Next added (commit: ${KSU_COMMIT_SHA:0:8})"
-        echo "::endgroup::"
-
-    - name: Add KernelSU
-      shell: bash
-      if: ${{ inputs.ksu_type == 'KSU' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Add KernelSU"
-        cd "$KERNEL_PLATFORM_FOLDER"
-        echo "Adding KernelSU..."
-        KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
-        if [ -z "$KSU_INPUT" ]; then
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-        else
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "$KSU_INPUT"
-        fi
-        git submodule update --init --recursive
-        cd KernelSU/kernel
-        BASE_VERSION=30000
-        KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
-        sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" Makefile
-        
-        if [ -f ksu.c ]; then
-          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
-        fi
-        
-        if [[ "$KSU_VERSION" -gt 32427 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
-          sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
-          sed -i 's|$(src)|$(abspath $(src))|' Kbuild
-          sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
-        fi
-        
-        echo "NEED_HOOKS=false" >> $GITHUB_ENV
-        
-        cd ..
-        KSU_COMMIT_SHA=$(git rev-parse HEAD)
-        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
-        
-        echo "Add KSU Configuration Settings"
-        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_KSU=y
-        EOF
-        
-        echo "KSU" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-        echo "KernelSU Version: $KSU_VERSION"
-        echo "✅ KernelSU added (commit: ${KSU_COMMIT_SHA:0:8})"
-        echo "::endgroup::"
-
-    - name: Apply SUSFS Patches
-      shell: bash
-      if: ${{ env.OP_SUSFS == 'true' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Apply SUSFS patches"
-        cd "$KERNEL_PLATFORM_FOLDER"
-        echo "Applying SUSFS patches..."
-        cp "$SUSFS_FOLDER/kernel_patches/fs/"* "$COMMON_KERNEL_FOLDER/fs/"
-        cp "$SUSFS_FOLDER/kernel_patches/include/linux/"* "$COMMON_KERNEL_FOLDER/include/linux/"
-        
-        susfs_version=$(grep '#define SUSFS_VERSION' "$COMMON_KERNEL_FOLDER/include/linux/susfs.h" | awk -F'"' '{print $2}')
-        echo "SUSVER=$susfs_version" >> $GITHUB_ENV
-        echo "$susfs_version" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "SusFS Version: $susfs_version"
-        
-        # Function to compare semantic versions
-        version_lte() {
-          [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$1" ]
-        }
-        
-        if version_lte "${susfs_version:1}" "1.5.12"; then
-          echo "NEED_HOOKS=true" >> $GITHUB_ENV
-        else
-          echo "NEED_HOOKS=false" >> $GITHUB_ENV
-        fi
-        
-        case "$susfs_version" in
-          "v1.5.8")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              patch -p1 --forward --fuzz=3 < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_apk_sign.c.patch"
-              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_core_hook.c.patch"
-              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_selinux.c.patch"
-              patch -p1 --forward --fuzz=3 < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_ksud.c.patch"
-            else
-              cd "$KSU_FOLDER"
-              patch -p1 --forward --fuzz=3 < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-            fi
-            ;;
-          "v1.5.9"|"v1.5.10"|"v1.5.11"|"v1.5.12")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -printf "%f\n" | cut -d'.' -f1); do
-                echo "Patching file: $file.c with fix_$file.c.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.c.patch"
-              done
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_kernel_compat.c.patch"
-            else
-              cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-            fi
-            ;;
-          "v2.0.0")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
-                echo "Patching file: $file with fix_$file.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
-              done
-              echo "Patching Hook Mode!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
-              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
-              if [ "$KSUVER" -le 33095 ]; then
-                echo "Patching Multi-manager Support for SusFS kernel!"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_manager.patch"
-              fi
-              if [ "$KSUVER" -ge 33068 ] && [ "$KSUVER" -lt 33070 ]; then
-                echo "Patching Multi-manager sepolicy Support for SusFS kernel!"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_sepolicy_fix.patch"
-              fi
-            else
-              cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-            fi
-            ;;
-          "v2.1.0")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
-                echo "Patching file: $file with fix_$file.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
-              done
-              echo "Patching Hook Mode!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
-              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
-              if [ "$KSUVER" -le 33095 ]; then
-                echo "Patching Multi-manager Support for SusFS kernel!"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_manager.patch"
-              fi
-              if [ "$KSUVER" -ge 33068 ] && [ "$KSUVER" -lt 33070 ]; then
-                echo "Patching Multi-manager sepolicy Support for SusFS kernel!"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/multi_sepolicy_fix.patch"
-              fi
-            else
-              cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-            fi
-            ;;
-          "v2.2.0")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
-                echo "Patching file: $file with fix_$file.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
-              done
-              echo "Patching Hook Mode!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
-              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
-            else
-              cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-            fi
-            ;;
-          *)
-            echo "::error::Unsupported SUSFS version: $susfs_version"
-            exit 1
-            ;;
-        esac
-        
-        cd "$COMMON_KERNEL_FOLDER"
-        if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
-          if ! grep -qxF '#include <trace/hooks/fs.h>' ./fs/namespace.c; then
-            sed -i '/#include <trace\/hooks\/blk.h>/a #include <trace\/hooks\/fs.h>' ./fs/namespace.c
-          fi
-        fi
-        
-        # Fake kernel patch to fix failures
-        fake_patched=0
-        fake_patched_expand=0
-        if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
-          if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
-            echo "nr_subpages Line not found. Fake Patching!"
-            sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
-            fake_patched=1
-          fi
-          
-          if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
-            echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
-            sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
-          fi
-          
-          if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
-            echo "#include <linux/zswap.h> Line not found. Adding missing header"
-            sed -i '/#include <linux\/sched\/sysctl.h>/a #include <linux\/zswap.h>' ./mm/memory.c
-          fi
-          
-          if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
-            echo "Temporarily expand the `last_vma_end` `if` block to fix a matching issue."
-            perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
-            fake_patched_expand=1
-          fi
-        fi
-        if [ "${{ env.ANDROID_VER }}" = "android12" ] && [ "${{ env.KERNEL_VER }}" = "5.10" ]; then
-          if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
-            echo "vma_pages Line not found. Fake Patching!"
-            fake_patched=1
-          fi
-        fi
-        if [ "${{ env.ANDROID_VER }}" = "android13" ] && [ "${{ env.KERNEL_VER }}" = "5.15" ]; then
-          if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
-            echo "vma_pages Line not found. Fake Patching!"
-            fake_patched=1
-          fi
-          
-          if grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
-            echo "#include swap_slots.h> Line found. Deleting header."
-            sed -i '/#include <linux\/swap_slots.h>/d' ./mm/memory.c
-            fake_patched=1
-          fi
-        fi
-        
-        if [ "${{ env.ANDROID_VER }}" = "android14" ] && [ "${{ env.KERNEL_VER }}" = "6.1" ]; then
-          if ! grep -qxF $'\tif (!vma_pages(vma))' ./fs/proc/task_mmu.c; then
-            echo "vma_pages Line not found. Fake Patching!"
-            fake_patched=1
-          fi
-          
-          if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
-            echo "#include <linux/dma-buf.h> Line not found. Adding missing header"
-            sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
-          fi
-        fi
-        
-        patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${{ env.SUSFS_KERNEL_BRANCH }}.patch"
-        
-        # Revert Fake kernel patch
-        if [ "$fake_patched_expand" = 1 ]; then
-          if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
-            if grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c && ! grep -qxF 'SUSFS_IS_INODE_SUS_MAP' ./fs/proc/task_mmu.c; then
-              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\) \{\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t\}/\t\t\tif (vma->vm_end > last_vma_end)\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);/' ./fs/proc/task_mmu.c
-            fi
-          fi
-        fi
-        
-        if [ "$fake_patched" = 1 ]; then
-          if [ "${{ env.ANDROID_VER }}" = "android15" ] && [ "${{ env.KERNEL_VER }}" = "6.6" ]; then
-            if grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
-              echo "nr_subpages Line found. Revert Fake Patching!"
-              sed -i -e '/unsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;/d' -e '/pagemap_entry_t \*res = NULL;/d' ./fs/proc/task_mmu.c
-            fi
-          fi
-          if [ "${{ env.ANDROID_VER }}" = "android12" ] && [ "${{ env.KERNEL_VER }}" = "5.10" ]; then
-            if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
-              echo "vma_pages Line found. Revert Fake Patching!"
-              sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-            fi
-          fi
-          if [ "${{ env.ANDROID_VER }}" = "android13" ] && [ "${{ env.KERNEL_VER }}" = "5.15" ]; then
-            if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
-              echo "vma_pages Line found. Revert Fake Patching!"
-              sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-            fi
-            
-            if ! grep -qxF '#include <linux/swap_slots.h>' ./mm/memory.c; then
-              echo "#include <linux/swap_slots.h> Line not found. Adding missing header"
-              sed -i '/#include <linux\/vmalloc.h>/a #include <linux\/swap_slots.h>' ./mm/memory.c
-            fi
-          fi
-          if [ "${{ env.ANDROID_VER }}" = "android14" ] && [ "${{ env.KERNEL_VER }}" = "6.1" ]; then
-            if grep -qxF $'\t\t\tgoto show_pad;' ./fs/proc/task_mmu.c; then
-              echo "vma_pages Line found. Revert Fake Patching!"
-              sed -i -e 's/goto show_pad;/return 0;/' ./fs/proc/task_mmu.c
-            fi
-          fi
-        fi
-        echo "✅ SUSFS patches applied"
-        
-        echo "Add SUSFS Configuration Settings"
-        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
-        CONFIG_KSU_SUSFS=y
-        CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-        CONFIG_KSU_SUSFS_SUS_PATH=y
-        CONFIG_KSU_SUSFS_SUS_MOUNT=y
-        CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-        CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-        CONFIG_KSU_SUSFS_SUS_KSTAT=y
-        CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-        CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-        CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-        CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-        CONFIG_KSU_SUSFS_ENABLE_LOG=y
-        CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-        CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-        CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-        CONFIG_KSU_SUSFS_SUS_MAP=y
-        CONFIG_KSU_SUSFS_SUS_SU=n
-        EOF
-        
         echo "::endgroup::"
 
     - name: Add BBG
@@ -1281,20 +827,8 @@ runs:
         echo "✅ BBG LSM added"
         echo "::endgroup::"
 
-    - name: Apply KSU Hooks
-      shell: bash
-      if: ${{ env.NEED_HOOKS == 'true' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Apply KSU hooks"
-        cd "$COMMON_KERNEL_FOLDER"
-        patch -p1 < "$KERNEL_PATCHES_FOLDER/next/scope_min_manual_hooks_v1.4.patch"
-        echo "✅ KSU hooks applied"
-        echo "::endgroup::"
-
     - name: Apply Other Patches
       shell: bash
-      if: ${{ inputs.enable_optimizations == 'true' }}
       run: |
         set -euo pipefail
         echo "::group::Apply Other patches"
@@ -1585,6 +1119,30 @@ runs:
         echo "✅ Droidspaces Support applied"
         echo "::endgroup::"
 
+    - name: Set ZRAM default compression
+      shell: bash
+      run: |
+        ALGO="${{ inputs.zram_compression }}"
+        if [ -z "$ALGO" ]; then
+          echo "ℹ️ ZRAM compression not specified; keeping defconfig default"
+          exit 0
+        fi
+
+        cd "$COMMON_KERNEL_FOLDER"
+
+        sed -i '/^CONFIG_ZRAM_DEF_COMP_/d' arch/arm64/configs/gki_defconfig
+        sed -i '/^CONFIG_ZRAM_DEF_COMP=/d' arch/arm64/configs/gki_defconfig
+
+        case "$ALGO" in
+          lz4)     echo 'CONFIG_ZRAM_DEF_COMP_LZ4=y' ;;
+          zstd)    echo 'CONFIG_ZRAM_DEF_COMP_ZSTD=y' ;;
+          lzo)     echo 'CONFIG_ZRAM_DEF_COMP_LZO=y' ;;
+          lzo-rle) echo 'CONFIG_ZRAM_DEF_COMP_LZORLE=y' ;;
+        esac >> arch/arm64/configs/gki_defconfig
+
+        echo "CONFIG_ZRAM_DEF_COMP=\"${ALGO}\"" >> arch/arm64/configs/gki_defconfig
+        echo "✅ ZRAM default: $ALGO (all algorithms still supported)"
+
     - name: Add Build based configs
       shell: bash
       run: |
@@ -1617,12 +1175,7 @@ runs:
         echo "Save Build Metadata"
         cd "$ARTIFACTS_FOLDER"
         echo "kernel_version=${{ env.KERNEL_FULL_VER }}" >> "$GITHUB_OUTPUT"
-        echo "ksu_version=${KSUVER:-unknown}" >> "$GITHUB_OUTPUT"
-        echo "ksu_type=${{ inputs.ksu_type }}" >> "$GITHUB_OUTPUT"
         echo "build_timestamp=${EFFECTIVE_BUILD_TIMESTAMP:-unknown}" >> "$GITHUB_OUTPUT"
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          echo "susfs_version=${SUSVER:-unknown}" >> "$GITHUB_OUTPUT"
-        fi
 
     - name: Customize Kernel Branding
       shell: bash
@@ -1654,7 +1207,7 @@ runs:
         cd "$COMMON_KERNEL_FOLDER"
         : > "$COMMON_KERNEL_FOLDER/.scmversion"
         
-        export PYTHONWARNINGS="${PYTHONWARNINGS:-}"
+        export PYTHONWARNINGS="${PYTHONWARNINGS}"
         
         echo "Getting last commit timestamp from kernel source..."
         COMMIT_TIMESTAMP=$(git log -1 --format=%ct 2>/dev/null || echo "$(date +%s)")
@@ -1737,71 +1290,11 @@ runs:
         
         make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" gki_defconfig
         
-        LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:--OP-WILD}"
-        
-        if [ "${{ inputs.use_stock_version }}" == "true" ]; then
-          STOCK_BOOT="$GITHUB_WORKSPACE/assets/stock_images/${OP_MODEL}/boot.img"
-          if [ -f "$STOCK_BOOT" ]; then
-            echo "📥 Extracting precise kernel version from stock boot.img..."
-            
-            # Отримуємо масив URL-адрес усіх APK файлів з останніх релізів Magisk
-            MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
-            
-            for URL in $MAGISK_RELEASES; do
-              echo "🔄 Testing magiskboot from: $(basename "$URL")"
-              wget -qO magisk.apk "$URL"
-              unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
-              mv libmagiskboot.so magiskboot
-              chmod +x magiskboot
-              
-              # Тестуємо запуск утиліти. Якщо помилка 132 (Illegal instruction) - йдемо далі
-              ./magiskboot --help >/dev/null 2>&1 || RET=$?
-              if [ "${RET:-0}" != "132" ]; then
-                 echo "✅ Found working magiskboot compatible with this CPU!"
-                 rm -f magisk.apk
-                 break
-              fi
-              echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
-              rm -f magiskboot magisk.apk
-            done
-
-            if [ ! -f "magiskboot" ]; then
-              echo "❌ Could not find any compatible magiskboot version."
-              exit 1
-            fi
-            
-            ./magiskboot unpack "$STOCK_BOOT" >/dev/null 2>&1
-            if [ -f "kernel" ]; then
-               STOCK_UNAME=$(strings kernel | grep -oP '^Linux version \K[^\s]+' | head -n1)
-               echo "📌 Stock kernel exact uname: $STOCK_UNAME"
-               BASE_VER=$(make kernelversion)
-               LOCAL_LOCALVERSION="${STOCK_UNAME#$BASE_VER}"
-               echo "✂️  Extracted localversion suffix: $LOCAL_LOCALVERSION"
-               rm -f kernel ramdisk.cpio header
-            fi
-            rm -f magiskboot
-          else
-            echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Falling back to default or manual suffix."
-            if [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
-              LOCAL_LOCALVERSION="${{ inputs.custom_kernel_suffix }}"
-            fi
-          fi
-        elif [ -n "${{ inputs.custom_kernel_suffix }}" ]; then
-          LOCAL_LOCALVERSION="${{ inputs.custom_kernel_suffix }}"
-        fi
-
+        LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:-}"
         if [ -n "${LOCAL_LOCALVERSION:-}" ]; then
           scripts/config --file "$OUT/.config" --set-str LOCALVERSION "${LOCAL_LOCALVERSION}"
           scripts/config --file "$OUT/.config" -d LOCALVERSION_AUTO || true
           sed -i 's/scm_version="$(scm_version --short)"/scm_version=""/' scripts/setlocalversion
-        fi
-        
-        if [ "${{ inputs.zram_compression }}" != "lz4" ]; then
-          echo "🗜️ Changing ZRAM default compression to: ${{ inputs.zram_compression }}"
-          scripts/config --file "$OUT/.config" --set-str ZRAM_DEF_COMP "${{ inputs.zram_compression }}"
-          if [ "${{ inputs.zram_compression }}" == "zstd" ]; then
-            scripts/config --file "$OUT/.config" -e CRYPTO_ZSTD
-          fi
         fi
         
         if [ "${{ inputs.optimize_level }}" = "O3" ]; then
@@ -2069,11 +1562,7 @@ runs:
         sed -i 's/do.check_boot_version=.*/do.check_boot_version=1/' anykernel.sh
         
         ZIP_MODEL=$(echo "$OP_MODEL" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+$//')
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
-          ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}_${{ inputs.ksu_type }}_${KSUVER:-unknown}_SuSFS_${SUSVER:-unknown}.zip"
-        else
-          ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}_${{ inputs.ksu_type }}_${KSUVER:-unknown}.zip"
-        fi
+        ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}.zip"
         mkdir -p "$ARTIFACTS_FOLDER"
         
         echo "Creating flashable ZIP: $ZIP_NAME"
@@ -2103,81 +1592,11 @@ runs:
         echo "   Size: $(numfmt --to=iec-i --suffix=B "$ZIP_SIZE")"
         echo "   SHA256: $ZIP_SHA256"
         echo "::endgroup::"
-    - name: Create Patched boot.img
-      id: create_boot_img
-      shell: bash
-      if: ${{ inputs.create_patched_img == 'true' }}
-      run: |
-        set -euo pipefail
-        echo "::group::Create patched boot.img via magiskboot"
-        
-        STOCK_BOOT="$GITHUB_WORKSPACE/assets/stock_images/${OP_MODEL}/boot.img"
-        
-        if [ -f "$STOCK_BOOT" ]; then
-          echo "Found stock boot.img at $STOCK_BOOT"
-          
-          MAGISK_RELEASES=$(curl -s -H "Authorization: Bearer ${{ inputs.github_token }}" https://api.github.com/repos/topjohnwu/Magisk/releases | jq -r '.[].assets[] | select(.name | test("Magisk-v.*\\.apk$")) | .browser_download_url')
-          
-          for URL in $MAGISK_RELEASES; do
-            echo "🔄 Testing magiskboot from: $(basename "$URL")"
-            wget -qO magisk.apk "$URL"
-            unzip -qj magisk.apk lib/x86_64/libmagiskboot.so
-            mv libmagiskboot.so magiskboot
-            chmod +x magiskboot
-            
-            ./magiskboot --help >/dev/null 2>&1 || RET=$?
-            if [ "${RET:-0}" != "132" ]; then
-               echo "✅ Found working magiskboot compatible with this CPU!"
-               rm -f magisk.apk
-               break
-            fi
-            echo "⚠️ CPU incompatibility (Illegal instruction). Trying older version..."
-            rm -f magiskboot magisk.apk
-          done
-
-          if [ ! -f "magiskboot" ]; then
-            echo "❌ Could not find any compatible magiskboot version."
-            exit 1
-          fi
-          
-          mkdir -p tmp_boot && cd tmp_boot
-          cp "$STOCK_BOOT" ./boot.img
-          
-          echo "Unpacking stock boot.img..."
-          ../magiskboot unpack boot.img
-          
-          # Знаходимо збудоване ядро
-          IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
-          if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
-            IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
-          elif [ -f "$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image" ]; then
-            IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image"
-          fi
-          
-          echo "Replacing kernel binary..."
-          cp "$IMAGE_PATH" ./kernel
-          
-          echo "Repacking patched boot.img..."
-          ../magiskboot repack boot.img patched_boot.img
-          
-          FINAL_IMG_NAME="Patched_boot_${OP_MODEL}_${OP_OS_VERSION}.img"
-          mv patched_boot.img "$ARTIFACTS_FOLDER/$FINAL_IMG_NAME"
-          
-          echo "✅ Patched boot.img created successfully: $FINAL_IMG_NAME"
-        else
-          echo "⚠️ Stock boot.img not found at $STOCK_BOOT. Skipping boot.img generation."
-          echo "💡 Tip: To generate it, place the file exactly at: $STOCK_BOOT"
-        fi
-        echo "::endgroup::"
 
     - name: Final Build Summary
       shell: bash
       run: |
         set -euo pipefail
-        
-        # Get commit SHAs with fallback
-        KSU_SHA="${KSU_COMMIT_SHA:-unknown}"
-        SUSFS_SHA="${SUSFS_COMMIT_SHA:-unknown}"
         
         {
           echo "Model: ${{ env.OP_MODEL }}"
@@ -2188,17 +1607,6 @@ runs:
           echo "Kernel Uname: ${{ env.KERNEL_UNAME }}"
           echo "Build User: ${{ env.BUILD_USER }}"
           echo "Build Host: ${{ env.BUILD_HOST }}"
-          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "KSUN Version: ${KSUVER:-unknown}"
-            echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
-          else
-            echo "KSU Version: ${KSUVER:-unknown}"
-            echo "KSU commit SHA: ${KSU_SHA:-unknown}"
-          fi
-          if [ "${{ env.OP_SUSFS }}" = true ]; then
-            echo "SUSFS Version: ${SUSVER:-unknown}"
-            echo "SUSFS commit SHA: $SUSFS_SHA"
-          fi
           echo "Optimization: ${{ inputs.optimize_level }}"
           echo "Clean Build: ${{ inputs.clean }}"
           echo ""
@@ -2237,31 +1645,7 @@ runs:
           echo "| **Kernel Uname** | \`${{ env.KERNEL_UNAME }}\` |"
           echo "| **Build User** | ${{ env.BUILD_USER }} |"
           echo "| **Build Host** | ${{ env.BUILD_HOST }} |"
-          if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "| **KSUN Version** | ${KSUVER:-unknown} |"
-          else
-            echo "| **KSU Version** | ${KSUVER:-unknown} |"
-          fi
-          
-          if [ "$KSU_SHA" != "unknown" ]; then
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/KernelSU-Next/KernelSU-Next/commit/$KSU_SHA) |"
-            else
-              echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
-            fi
-          else
-            echo "| **KSU Commit** | unknown |"
-          fi
-          
-          if [ "${{ env.OP_SUSFS }}" = true ]; then
-            echo "| **SUSFS Version** | ${SUSVER:-unknown} |"
-            
-            if [ "$SUSFS_SHA" != "unknown" ]; then
-              echo "| **SUSFS Commit** | [\`${SUSFS_SHA:0:8}\`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/$SUSFS_SHA) |"
-            else
-              echo "| **SUSFS Commit** | unknown |"
-            fi
-          fi
+          echo "| **Root Method** | NONE |"
           
           echo ""
           echo "### 🔧 OnePlus Features"
@@ -2312,10 +1696,8 @@ runs:
       uses: actions/upload-artifact@v7
       with:
         name: ${{ env.ZIP_NAME }}
-        path: |
-          ${{ env.ARTIFACTS_FOLDER }}/${{ env.ZIP_NAME }}
-          ${{ env.ARTIFACTS_FOLDER }}/Patched_boot_*.img
-        archive: true
+        path: ${{ env.ARTIFACTS_FOLDER }}/${{ env.ZIP_NAME }}
+        archive: false
         compression-level: 0
         retention-days: 90
 
@@ -2341,7 +1723,7 @@ runs:
       uses: ./action-source/.github/actions/cache/save
       with:
         cache_path: ${{ env.CCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_key: kernel-v3-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         cache_bucket: "ccache-cache"
         debug: ${{ inputs.debug }}
         github_token: ${{ inputs.github_token }}
@@ -2349,11 +1731,11 @@ runs:
         compression_level: 6
 
     - name: Save LTO LD cache
-      if: always() && ${{ env.OP_LTO != 'none' }} && steps.build_kernel_step.conclusion == 'success'
+      if: ${{ always() && env.OP_LTO != 'none' && steps.build_kernel_step.conclusion == 'success' }}
       uses: ./action-source/.github/actions/cache/save
       with:
         cache_path: ${{ env.LDCACHE_DIR }}
-        cache_key: ${{ inputs.ksu_type }}-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
+        cache_key: kernel-v3-LTO-${{ env.OP_MODEL }}-${{ env.OP_OS_VERSION }}-${{ env.KERNEL_FULL_VER }}-${{ env.CLANG_VERSION_SHORT }}
         cache_bucket: "lto-cache"
         debug: ${{ inputs.debug }}
         github_token: ${{ inputs.github_token }}
