@@ -21,5 +21,7 @@
   "ip_set": true,
   "unicode": true,
   "ntsync": true,
-  "uname": "OP"
+  "uname": "OP",
+  "zram_compression": "default",
+  "kernel_localversion": ""
 }
