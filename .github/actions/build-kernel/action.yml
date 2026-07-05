@@ -1122,7 +1122,7 @@ runs:
         echo "✅ Droidspaces Support applied"
         echo "::endgroup::"
 
-    - name: 🔍 Розвідка: Пошук кастомних ZRAM алгоритмів (розширена)
+    - name: "🔍 Розвідка: Пошук кастомних ZRAM алгоритмів (розширена)"
       shell: bash
       run: |
         set -euo pipefail
