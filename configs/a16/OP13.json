@@ -14,14 +14,16 @@
   "rust_build": false,
   "disk_cleanup": false,
   "hmbird": true,
+  "opt": true,
   "ds": true,
   "bbg": true,
   "bbr": true,
+  "bbr3": true,
   "ttl": true,
   "ip_set": true,
   "unicode": true,
   "ntsync": true,
   "uname": "OP",
   "zram_compression": "default",
-  "kernel_localversion": ""
+  "kernel_localversion": "6.6.89-android15-8-g97a9aaefab9a-ab14519050-4k"
 }
