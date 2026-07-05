@@ -53,17 +53,6 @@ on:
         description: 'Custom kernel build timestamp for uname -a (e.g. "Tue Feb 10 10:01:02 UTC 2026"). Leave empty for current time.'
         type: string
         default: ''
-      kernel_localversion:
-        description: 'Kernel localversion suffix (e.g. -custom). Appended after git hash.'
-        required: false
-        type: string
-        default: ''
-      zram_compression:
-        description: 'Default ZRAM compression algorithm (none keeps the defconfig default)'
-        required: false
-        type: choice
-        options: [none, lz4, zstd, lzo, lzo-rle]
-        default: 'none'
 
 jobs:
   set-op-model:
@@ -375,8 +364,6 @@ jobs:
           clean: ${{ inputs.clean_build }}
           debug: ${{ inputs.debug }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          kernel_localversion: ${{ inputs.kernel_localversion }}
-          zram_compression: ${{ inputs.zram_compression }}
 
       - name: 📊 Build statistics
         id: build-stat

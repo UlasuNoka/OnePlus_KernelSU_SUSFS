@@ -24,13 +24,6 @@ inputs:
   github_token:
     description: 'GitHub Token'
     required: true
-  kernel_localversion:
-    description: 'Kernel localversion suffix'
-    default: ''
-  zram_compression:
-    description: 'Default ZRAM compression algorithm (none keeps the defconfig default)'
-    default: 'none'
-
 
 outputs:
   kernel_version:
@@ -118,6 +111,8 @@ runs:
         bindgen="$OP_BINDGEN"
         ds="$OP_DS"
         ntsync="$OP_NTSYNC"
+        zram="$OP_ZRAM_COMPRESSION"
+        localver="$OP_KERNEL_LOCALVERSION"
         optimize='${{ inputs.optimize_level }}'
         
         errors=()
@@ -231,11 +226,8 @@ runs:
         fi
         
         # OP_C_COMPILER currently has no checks!
-        
         # OP_RUST_COMPILER currently has no checks!
-        
         # OP_ZYC_COMPILER currently has no checks!
-        
         # OP_BINDGEN currently has no checks!
         
         if [[ -z "$ds" ]]; then
@@ -248,6 +240,17 @@ runs:
           errors+=("Input 'ntsync' cannot be empty")
         elif [[ "$ntsync" != "true" && "$ntsync" != "false" ]]; then
           errors+=("Input 'ntsync' contains invalid characters. Allowed: 'true' or 'false'. Got: '$ntsync'")
+        fi
+        
+        if [[ -n "$zram" && "$zram" != "null" && "$zram" != "default" && \
+              "$zram" != "lzo" && "$zram" != "lzo-rle" && \
+              "$zram" != "lz4" && "$zram" != "zstd" && \
+              "$zram" != "lz4k" && "$zram" != "zstdn" && "$zram" != "zstdn_o" ]]; then
+          errors+=("Input 'zram_compression' contains invalid algorithm. Got: '$zram'")
+        fi
+        
+        if [[ -n "$localver" && "$localver" != "null" && "$localver" =~ [[:space:]] ]]; then
+          errors+=("Input 'kernel_localversion' cannot contain spaces. Got: '$localver'")
         fi
         
         case "$optimize" in
@@ -337,8 +340,8 @@ runs:
     - name: 🏷️ Override Kernel Localversion
       shell: bash
       run: |
-        LOCALVER="${{ inputs.kernel_localversion }}"
-        if [ -n "$LOCALVER" ]; then
+        LOCALVER="$OP_KERNEL_LOCALVERSION"
+        if [ -n "$LOCALVER" ] && [ "$LOCALVER" != "null" ]; then
           cd "$COMMON_KERNEL_FOLDER"
 
           printf '#!/bin/sh\necho "%s"\n' "$LOCALVER" > scripts/setlocalversion
@@ -1119,12 +1122,33 @@ runs:
         echo "✅ Droidspaces Support applied"
         echo "::endgroup::"
 
+    - name: 🔍 Розвідка: Пошук кастомних ZRAM алгоритмів (розширена)
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Структура кореневого каталогу kernel_platform"
+        find "$KERNEL_PLATFORM_FOLDER" -maxdepth 2 -type d
+        echo "::endgroup::"
+
+        echo "::group::Пошук по ВСЬОМУ дереву (common + vendor + techpack тощо)"
+        cd "$KERNEL_PLATFORM_FOLDER"
+        
+        echo "--- Шукаємо в Kconfig ---"
+        grep -rnI "ZSTDN\|LZ4K" --include="Kconfig*" . || echo "У Kconfig нічого не знайдено"
+        
+        echo "--- Шукаємо у вихідному коді (.c, .h) ---"
+        grep -rnI "zstdn\|lz4k" . --include="*.c" --include="*.h" || echo "У коді нічого не знайдено"
+        echo "::endgroup::"
+
+        echo "🛑 Навмисна зупинка збірки. Перевірте логи цього кроку!"
+        exit 1
+
     - name: Set ZRAM default compression
       shell: bash
       run: |
-        ALGO="${{ inputs.zram_compression }}"
-        if [ -z "$ALGO" ] || [ "$ALGO" = "none" ]; then
-          echo "ℹ️ ZRAM compression not specified; keeping defconfig default"
+        ALGO="$OP_ZRAM_COMPRESSION"
+        if [ -z "$ALGO" ] || [ "$ALGO" = "default" ] || [ "$ALGO" = "null" ]; then
+          echo "ℹ️ ZRAM compression not specified in JSON; keeping defconfig default"
           exit 0
         fi
 
@@ -1292,8 +1316,8 @@ runs:
         
         LOCAL_LOCALVERSION="${CUSTOM_LOCALVERSION:-}"
 
-        if [ -n "${{ inputs.kernel_localversion }}" ]; then
-          echo "ℹ️ Explicit kernel_localversion supplied; skipping branding suffix to avoid double localversion"
+        if [ -n "$OP_KERNEL_LOCALVERSION" ] && [ "$OP_KERNEL_LOCALVERSION" != "null" ]; then
+          echo "ℹ️ Explicit kernel_localversion supplied via JSON; skipping branding suffix to avoid double localversion"
           LOCAL_LOCALVERSION=""
         fi
 
