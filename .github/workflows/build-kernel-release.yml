@@ -17,18 +17,18 @@ on:
         required: true
         type: choice
         options:
-          - OOS14+15+16
-          - OOS15+16
-          - OOS14+15
-          - OOS16
-          - OOS15
-          - OOS14
+          - A14+15+16
+          - A15+16
+          - A14+15
+          - A16
+          - A15
+          - A14
           - android16-6.12
           - android15-6.6
           - android14-6.1
           - android13-5.15
           - android12-5.10
-        default: OOS16
+        default: A16
       optimize_level:
         description: "Compiler optimization level"
         required: true
@@ -96,26 +96,26 @@ jobs:
           jq_filter="."
 
           case "$input" in
-            OOS14+15+16)
+            A14+15+16)
               ;;
-            OOS15+16)
-              jq_filter="map(select(.os_version == \"OOS15\" or .os_version == \"OOS16\"))"
+            A15+16)
+              jq_filter="map(select(.os_version == \"A15\" or .os_version == \"A16\"))"
               ;;
-            OOS14+15)
-              jq_filter="map(select(.os_version == \"OOS14\" or .os_version == \"OOS15\"))"
+            A14+15)
+              jq_filter="map(select(.os_version == \"A14\" or .os_version == \"A15\"))"
               ;;
-            OOS16)
-              jq_filter="map(select(.os_version == \"OOS16\"))"
+            A16)
+              jq_filter="map(select(.os_version == \"A16\"))"
               ;;
-            OOS15)
-              jq_filter="map(select(.os_version == \"OOS15\"))"
+            A15)
+              jq_filter="map(select(.os_version == \"A15\"))"
               ;;
-            OOS14)
-              jq_filter="map(select(.os_version == \"OOS14\"))"
+            A14)
+              jq_filter="map(select(.os_version == \"A14\"))"
               ;;
             android*-*.*)
               IFS='-' read -r av kv <<< "$input"
-              jq_filter="map(select(.os_version == \"OOS15\" or .os_version == \"OOS16\")) | map(select(.android_version == \"$av\" and .kernel_version == \"$kv\"))"
+              jq_filter="map(select(.os_version == \"A15\" or .os_version == \"A16\")) | map(select(.android_version == \"$av\" and .kernel_version == \"$kv\"))"
               echo "ℹ️  Android-Kernel filter applied: $av-$kv"
               ;;
             *)
@@ -129,7 +129,7 @@ jobs:
 
           filtered=$(echo "$filtered" | jq '
             sort_by(
-              (.os_version | gsub("OOS"; "") | tonumber) * -1,
+              (.os_version | gsub("A"; "") | tonumber) * -1,
               .model
             )
           ')
@@ -157,7 +157,7 @@ jobs:
 
           merged_matrix=$(echo "$merged_matrix" | jq '
             sort_by(
-              (.os_version | gsub("OOS"; "") | tonumber? // 0) * -1,
+              (.os_version | gsub("A"; "") | tonumber? // 0) * -1,
               .model
             )
           ')
