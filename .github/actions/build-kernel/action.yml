@@ -921,9 +921,8 @@ runs:
                 module_name="$extracted_name"
                 priority=$((i + 1))
               fi
-            done
-
-            break # Match found, stop checking lower priorities
+              
+              break # Match found, stop checking lower priorities
             fi
           done
           
