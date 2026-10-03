@@ -1250,6 +1250,7 @@ runs:
         patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch"
         
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        # Base Droidspaces configuration
         CONFIG_SYSVIPC=y
         CONFIG_DEVTMPFS=y
         CONFIG_PID_NS=y
@@ -1258,7 +1259,20 @@ runs:
         CONFIG_NETFILTER_XT_TARGET_LOG=y
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
         CONFIG_USER_NS=y
+
+        # Container resource management and limits
+        CONFIG_CFS_BANDWIDTH=y
+        CONFIG_CGROUP_PIDS=y
+
+        # Bridge packet filtering for Docker networks
+        CONFIG_BRIDGE_NETFILTER=y
+
+        # OverlayFS flash memory optimizations (less UFS wear, faster pulls)
+        CONFIG_OVERLAY_FS_REDIRECT_DIR=y
+        CONFIG_OVERLAY_FS_INDEX=y
+        CONFIG_OVERLAY_FS_METACOPY=y
         EOF
+
         
         if [ "${{ env.OP_RUST_BUILD }}" = "true" ]; then
           echo "Add IPC NS missing symbols for rust binder"
