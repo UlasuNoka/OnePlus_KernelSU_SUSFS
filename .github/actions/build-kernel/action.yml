@@ -1264,8 +1264,8 @@ runs:
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
 
         # [EXPERIMENTAL] Droidspaces Resource Limits
-        CONFIG_CGROUP_PIDS=y
-        CONFIG_CFS_BANDWIDTH=y
+        # CONFIG_CGROUP_PIDS=y
+        # CONFIG_CFS_BANDWIDTH=y
 
         EOF
 
