@@ -1261,11 +1261,11 @@ runs:
         CONFIG_USER_NS=y
 
         # Container resource management and limits
-        # CONFIG_CFS_BANDWIDTH=y
-        # CONFIG_CGROUP_PIDS=y
+        CONFIG_CFS_BANDWIDTH=y
+        CONFIG_CGROUP_PIDS=y
 
         # Bridge packet filtering for Docker networks
-        # CONFIG_BRIDGE_NETFILTER=y
+        CONFIG_BRIDGE_NETFILTER=y
 
         # OverlayFS flash memory optimizations (less UFS wear, faster pulls)
         # CONFIG_OVERLAY_FS_REDIRECT_DIR=y
