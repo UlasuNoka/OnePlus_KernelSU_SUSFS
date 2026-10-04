@@ -1250,6 +1250,7 @@ runs:
         patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/common/droidspaces/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch"
         
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+
         # Base Droidspaces configuration
         CONFIG_SYSVIPC=y
         CONFIG_DEVTMPFS=y
@@ -1257,14 +1258,14 @@ runs:
         CONFIG_POSIX_MQUEUE=y
         CONFIG_USER_NS=y
 
-        # Docker NAT, routing and bridge filtering
-        CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-        CONFIG_BRIDGE_NETFILTER=y
-
         # Firewall support (UFW)
         CONFIG_NETFILTER_XT_TARGET_REJECT=y
         CONFIG_NETFILTER_XT_TARGET_LOG=y
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
+
+        # [EXPERIMENTAL] Droidspaces Resource Limits
+        CONFIG_CGROUP_PIDS=y
+        CONFIG_CFS_BANDWIDTH=y
 
         EOF
 
