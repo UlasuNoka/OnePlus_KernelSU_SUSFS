@@ -1259,18 +1259,6 @@ runs:
         CONFIG_NETFILTER_XT_TARGET_LOG=y
         CONFIG_NETFILTER_XT_MATCH_RECENT=y
         CONFIG_USER_NS=y
-
-        # Container resource management and limits
-        CONFIG_CFS_BANDWIDTH=y
-        CONFIG_CGROUP_PIDS=y
-
-        # Bridge packet filtering for Docker networks
-        CONFIG_BRIDGE_NETFILTER=y
-
-        # OverlayFS flash memory optimizations (less UFS wear, faster pulls)
-        CONFIG_OVERLAY_FS_REDIRECT_DIR=y
-        CONFIG_OVERLAY_FS_INDEX=y
-        CONFIG_OVERLAY_FS_METACOPY=y
         EOF
 
         
